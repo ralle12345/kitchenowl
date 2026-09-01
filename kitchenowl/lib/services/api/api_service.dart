@@ -54,6 +54,7 @@ class ApiService {
   late final Socket socket;
   final String baseUrl;
   String? _refreshToken;
+  Map<String, String> _customHeaders = {};
   Map<String, String> headers = {};
   Future<void>? _refreshThread;
 
@@ -65,6 +66,11 @@ class ApiService {
 
   static final ValueNotifier<Map<String, dynamic>?> _serverInfoNotifier =
       ValueNotifier<Map<String, dynamic>?>(null);
+
+  static const Set<String> _reservedHeaderNames = {
+    'authorization',
+    'user-agent',
+  };
 
   ApiService._internal(String baseUrl)
       : baseUrl = baseUrl.isNotEmpty ? baseUrl + _API_PATH : "" {
@@ -155,12 +161,51 @@ class ApiService {
     _handleTokenBeforeReauth = handler;
   }
 
-  static Future<void> connectTo(String url, {String? refreshToken}) async {
+  static Future<void> connectTo(
+    String url, {
+    String? refreshToken,
+    Map<String, String>? customHeaders,
+  }) async {
     url = url.endsWith("/") ? url.substring(0, url.length - 1) : url;
     getInstance().dispose();
     _instance = ApiService._internal(url);
     _instance!.refreshToken = refreshToken ?? '';
+    _instance!.setCustomHeaders(customHeaders ?? const {});
     await _instance!.refresh();
+  }
+
+  Map<String, String> get customHeaders =>
+      Map<String, String>.from(_customHeaders);
+
+  void setCustomHeaders(
+    Map<String, String> customHeaders, {
+    bool reconnectSocket = true,
+  }) {
+    final nextHeaders = <String, String>{};
+    for (final entry in customHeaders.entries) {
+      final name = entry.key.trim();
+      if (name.isEmpty) continue;
+      if (_reservedHeaderNames.contains(name.toLowerCase())) continue;
+      nextHeaders[name] = entry.value.trim();
+    }
+
+    _customHeaders = nextHeaders;
+    final authorization = headers['Authorization'];
+    final userAgent = headers['User-Agent'];
+    headers = {
+      if (userAgent != null && userAgent.isNotEmpty) 'User-Agent': userAgent,
+      ..._customHeaders,
+      if (authorization != null && authorization.isNotEmpty)
+        'Authorization': authorization,
+    };
+
+    socket.io.options?['extraHeaders'] = headers;
+    if (reconnectSocket &&
+        connectionStatus == Connection.authenticated &&
+        !socket.disconnected) {
+      socket.disconnect();
+      socket.connect();
+    }
   }
 
   Future<void> refresh() {

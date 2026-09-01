@@ -2,6 +2,7 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 import 'package:kitchenowl/config.dart';
+import 'package:kitchenowl/models/custom_server_header.dart';
 import 'package:kitchenowl/models/user.dart';
 import 'package:kitchenowl/services/api/api_service.dart';
 import 'package:kitchenowl/services/storage/mem_storage.dart';
@@ -10,6 +11,8 @@ import 'package:kitchenowl/services/transaction_handler.dart';
 import 'package:kitchenowl/platform/dart_html/dart_html.dart' as html;
 
 class AuthCubit extends Cubit<AuthState> {
+  static const String _serverHeadersStorageKey = 'SERVER_HEADERS';
+
   bool _forcedOfflineMode = false;
 
   AuthCubit({reloadTokenBeforeRequest = kIsWeb}) : super(const Loading()) {
@@ -36,7 +39,13 @@ class AuthCubit extends Cubit<AuthState> {
         : await PreferenceStorage.getInstance().read(key: 'URL') ??
             Config.defaultServer;
     final token = await SecureStorage.getInstance().read(key: 'TOKEN');
-    _newConnection(url, token: token, storeData: false);
+    final customHeaders = await loadServerHeaders();
+    _newConnection(
+      url,
+      token: token,
+      customHeaders: customHeaders,
+      storeData: false,
+    );
   }
 
   Future<void> updateState() async {
@@ -101,18 +110,64 @@ class AuthCubit extends Cubit<AuthState> {
     }
   }
 
-  void setupServer(String url) async {
+  void setupServer(
+    String url, {
+    List<CustomServerHeader> customHeaders = const [],
+  }) async {
     if (kIsWeb) return;
     emit(const Loading());
     if (!url.contains("http")) url = "https://" + url;
 
-    _newConnection(url);
+    _newConnection(url, customHeaders: customHeaders);
   }
 
   void setupDefaultServer() async {
     if (kIsWeb) return;
     emit(const Loading());
-    _newConnection(Config.defaultServer, storeData: false);
+    await clearServerHeaders();
+    _newConnection(
+      Config.defaultServer,
+      customHeaders: const [],
+      storeData: false,
+    );
+  }
+
+  Future<List<CustomServerHeader>> loadServerHeaders() async {
+    final value = kIsWeb
+        ? await PreferenceStorage.getInstance().read(
+            key: _serverHeadersStorageKey,
+          )
+        : await SecureStorage.getInstance().read(key: _serverHeadersStorageKey);
+
+    return CustomServerHeader.decodeList(value);
+  }
+
+  Future<void> saveServerHeaders(List<CustomServerHeader> headers) async {
+    if (kIsWeb) {
+      await PreferenceStorage.getInstance().write(
+        key: _serverHeadersStorageKey,
+        value: CustomServerHeader.encodeList(headers),
+      );
+    } else {
+      await SecureStorage.getInstance().write(
+        key: _serverHeadersStorageKey,
+        value: CustomServerHeader.encodeList(headers),
+      );
+    }
+  }
+
+  Future<void> clearServerHeaders() async {
+    if (kIsWeb) {
+      await PreferenceStorage.getInstance().delete(key: _serverHeadersStorageKey);
+    } else {
+      await SecureStorage.getInstance().delete(key: _serverHeadersStorageKey);
+    }
+  }
+
+  Future<void> updateServerHeaders(List<CustomServerHeader> headers) async {
+    final mergedHeaders = CustomServerHeader.toHeaderMap(headers);
+    ApiService.getInstance().setCustomHeaders(mergedHeaders);
+    await saveServerHeaders(headers);
   }
 
   User? getUser() {
@@ -260,6 +315,7 @@ class AuthCubit extends Cubit<AuthState> {
     emit(const Loading());
     await PreferenceStorage.getInstance().delete(key: 'URL');
     await SecureStorage.getInstance().delete(key: 'TOKEN');
+    await SecureStorage.getInstance().delete(key: _serverHeadersStorageKey);
     await MemStorage.getInstance().clearAll();
     ApiService.getInstance().dispose();
     refresh();
@@ -268,14 +324,21 @@ class AuthCubit extends Cubit<AuthState> {
   Future<void> _newConnection(
     String? url, {
     String? token,
+    List<CustomServerHeader> customHeaders = const [],
     bool storeData = true,
   }) async {
     if (url == null || url.isEmpty) return;
-    await ApiService.connectTo(url, refreshToken: token);
+    final mergedHeaders = CustomServerHeader.toHeaderMap(customHeaders);
+    await ApiService.connectTo(
+      url,
+      refreshToken: token,
+      customHeaders: mergedHeaders,
+    );
     if (storeData && ApiService.getInstance().isConnected()) {
       if (!kIsWeb) {
         await PreferenceStorage.getInstance().write(key: 'URL', value: url);
       }
+      await saveServerHeaders(customHeaders);
       if (token != null && token.isNotEmpty) {
         await SecureStorage.getInstance().write(key: 'TOKEN', value: token);
       }

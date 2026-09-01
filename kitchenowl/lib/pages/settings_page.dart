@@ -18,6 +18,7 @@ import 'package:kitchenowl/pages/analytics_page.dart';
 import 'package:kitchenowl/pages/household_member_page.dart';
 import 'package:kitchenowl/pages/household_update_page.dart';
 import 'package:kitchenowl/pages/reports_list_page.dart';
+import 'package:kitchenowl/pages/settings_server_headers_page.dart';
 import 'package:kitchenowl/pages/settings_server_user_page.dart';
 import 'package:kitchenowl/services/api/api_service.dart';
 import 'package:kitchenowl/styles/colors.dart';
@@ -425,6 +426,24 @@ class _SettingsPageState extends State<SettingsPage> {
                           onChanged: (value) =>
                               BlocProvider.of<AuthCubit>(context)
                                   .setForcedOfflineMode(value),
+                        ),
+                      ),
+                    ),
+                  if (kIsWeb || Platform.isAndroid || Platform.isIOS)
+                    ListTile(
+                      title: Text(
+                        AppLocalizations.of(context)!.serverHeaders,
+                      ),
+                      subtitle: Text(
+                        AppLocalizations.of(context)!.serverHeadersDescription,
+                      ),
+                      leading: const Icon(Icons.http_rounded),
+                      trailing: const Icon(Icons.arrow_forward_ios_rounded),
+                      onTap: () => Navigator.of(context, rootNavigator: true)
+                          .push(
+                        MaterialPageRoute(
+                          builder: (context) =>
+                              const SettingsServerHeadersPage(),
                         ),
                       ),
                     ),
